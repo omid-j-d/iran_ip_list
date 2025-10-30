@@ -1,9 +1,9 @@
 name: Collect Iranian IPs
 
 on:
-  workflow_dispatch:     # برای اجرای دستی
+  workflow_dispatch:     # اجرای دستی
   schedule:
-    - cron: '0 3 * * *'  # هر روز ساعت ۳ صبح UTC
+    - cron: '0 3 * * *'  # اجرای خودکار هر روز ساعت ۳ صبح UTC
 
 jobs:
   collect:
@@ -24,13 +24,14 @@ jobs:
 
       - name: Run collector script
         run: |
-          python collect_all_ir_ips.py
+          mkdir -p data
+          python collect_ir_ips.py
 
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add ir_ips.txt
+          git add data/ir_ips.txt
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
