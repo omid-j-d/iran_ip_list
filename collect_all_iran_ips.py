@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-collect_ir_ips.py
-Collects Iranian IP ranges from multiple public sources (CIDR lists, text, html, rsc),
-merges, deduplicates, and outputs them into 'ir_ips.txt'.
+collect_all_iran_ips.py
+جمع‌آوری IPهای ایرانی از چند منبع عمومی و خروجی در فایل data/ir_ips.txt
 
-Requirements:
+نیازمندی‌ها:
     pip install requests beautifulsoup4
 """
+
 import re
 import sys
 import time
@@ -15,7 +15,7 @@ import ipaddress
 from typing import List
 import requests
 
-# ---- Sources ----
+# ---- منابع ----
 DEFAULT_SOURCES = [
     "https://www.ipdeny.com/ipblocks/data/countries/ir.zone",
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/geolite2_country/country_ir.netset",
@@ -25,7 +25,7 @@ DEFAULT_SOURCES = [
     "https://raw.githubusercontent.com/ipverse/rir-ip/master/country/ir/ipv4-aggregated.txt",
 ]
 
-HEADERS = {"User-Agent": "ir-ip-collector/1.0 (+https://example)"}
+HEADERS = {"User-Agent": "ir-ip-collector/1.0 (+https://github.com/omiddev/iran_ip_list)"}
 TIMEOUT = 20
 
 CIDR_RE = re.compile(r'\b(?P<ip>(?:\d{1,3}(?:\.\d{1,3}){3}))(?:/(?P<prefix>\d{1,2}))?\b')
@@ -34,6 +34,7 @@ MIKROTIK_ADDR_RE = re.compile(r'address\s*=\s*(?P<cidr>[\d\.:/a-fA-F]+)')
 
 
 def fetch_text(url: str, tries=2) -> str:
+    """دانلود محتوای یک URL با چند بار تلاش"""
     last_exc = None
     for attempt in range(1, tries + 1):
         try:
@@ -44,12 +45,12 @@ def fetch_text(url: str, tries=2) -> str:
         except Exception as e:
             last_exc = e
             time.sleep(1)
-    print(f"[!] Failed to fetch {url}: {last_exc}", file=sys.stderr)
+    print(f"[!] دریافت از {url} ناموفق بود: {last_exc}", file=sys.stderr)
     return ""
 
 
 def extract_candidate_strings(text: str) -> List[str]:
-    """Extract potential IP/CIDR strings from text."""
+    """استخراج رشته‌های احتمالی IP/CIDR از متن"""
     items = set()
     for m in CIDR_RE.finditer(text):
         ip = m.group("ip")
@@ -71,41 +72,45 @@ def extract_candidate_strings(text: str) -> List[str]:
 
 
 def parse_to_networks(items: List[str]) -> List[ipaddress._BaseNetwork]:
+    """تبدیل رشته‌ها به اشیاء شبکه"""
     nets = []
-    for it in items:
-        s = it.strip()
+    for s in items:
+        s = s.strip()
         if not s:
             continue
         if "/" not in s:
             s += "/32" if ":" not in s else "/128"
         try:
-            net = ipaddress.ip_network(s.strip(), strict=False)
-            nets.append(net)
+            nets.append(ipaddress.ip_network(s, strict=False))
         except Exception:
             s2 = re.sub(r'[,\s;]+$', '', s)
             try:
-                net = ipaddress.ip_network(s2, strict=False)
-                nets.append(net)
+                nets.append(ipaddress.ip_network(s2, strict=False))
             except Exception:
                 continue
     return nets
 
 
 def collapse_and_sort(nets: List[ipaddress._BaseNetwork]) -> List[ipaddress._BaseNetwork]:
+    """ادغام و مرتب‌سازی شبکه‌ها"""
     v4 = [n for n in nets if isinstance(n, ipaddress.IPv4Network)]
     v6 = [n for n in nets if isinstance(n, ipaddress.IPv6Network)]
+
     collapsed_v4 = list(ipaddress.collapse_addresses(v4))
     collapsed_v6 = list(ipaddress.collapse_addresses(v6))
+
     collapsed_v4.sort(key=lambda x: (int(x.network_address), x.prefixlen))
     collapsed_v6.sort(key=lambda x: (int(x.network_address), x.prefixlen))
+
+    print(f"بعد از ادغام: {len(collapsed_v4)} IPv4 + {len(collapsed_v6)} IPv6")
     return collapsed_v4 + collapsed_v6
 
 
 def extract_from_html_nirsoft(text: str) -> List[str]:
-    """Try to extract IPs from Nirsoft HTML page."""
+    """استخراج IP از صفحه HTML سایت Nirsoft"""
     try:
         from bs4 import BeautifulSoup
-    except Exception:
+    except ImportError:
         return []
     try:
         soup = BeautifulSoup(text, "html.parser")
@@ -121,52 +126,56 @@ def extract_from_html_nirsoft(text: str) -> List[str]:
                     items.add(ip)
             for m in CIDR_V6_RE.finditer(txt):
                 s = m.group(0)
-                if "/" in s:
-                    items.add(s)
-                else:
-                    items.add(s + "/128")
+                items.add(s if "/" in s else s + "/128")
         return sorted(items)
     except Exception:
         return []
 
 
 def collect_from_sources(sources: List[str]) -> List[ipaddress._BaseNetwork]:
+    """جمع‌آوری IPها از منابع مختلف"""
     collected = []
     for src in sources:
-        print(f"[+] Fetching: {src}")
+        print(f"[+] دریافت از: {src}")
         txt = fetch_text(src)
         if not txt:
-            print(f"    -> Failed or empty.", file=sys.stderr)
+            print(f"    -> شکست در دریافت.", file=sys.stderr)
             continue
+
         items = []
         if "nirsoft.net" in src:
             html_items = extract_from_html_nirsoft(txt)
             if html_items:
                 items.extend(html_items)
+
         items.extend(extract_candidate_strings(txt))
         items = sorted(set(items))
         nets = parse_to_networks(items)
-        print(f"    -> Extracted {len(nets)} networks/IPs")
+        print(f"    -> استخراج {len(nets)} شبکه/IP")
         collected.extend(nets)
+
     return collected
 
 
-def write_output(nets: List[ipaddress._BaseNetwork], filename="ir_ips.txt"):
+def write_output(nets: List[ipaddress._BaseNetwork], filename="data/ir_ips.txt"):
+    """نوشتن خروجی در فایل"""
+    import os
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, "w", encoding="utf-8") as f:
         for n in nets:
             f.write(str(n.with_prefixlen) + "\n")
-    print(f"[+] Wrote {len(nets)} entries to {filename}")
+    print(f"[+] {len(nets)} رکورد در '{filename}' ذخیره شد.")
 
 
 def main():
-    print("[*] Starting IR IP collection ...")
+    print("[*] شروع جمع‌آوری IPهای ایران ...")
     nets = collect_from_sources(DEFAULT_SOURCES)
     if not nets:
-        print("[!] No IPs found. Check your network or sources.")
+        print("[!] هیچ IPای پیدا نشد. بررسی شبکه یا منابع لازم است.")
         sys.exit(1)
     merged = collapse_and_sort(nets)
-    write_output(merged, "data/ir_ips.txt")
-    print("[*] Done.")
+    write_output(merged)
+    print("[*] پایان عملیات.")
 
 
 if __name__ == "__main__":
