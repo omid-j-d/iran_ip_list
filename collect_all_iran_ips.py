@@ -165,7 +165,7 @@ def main():
         print("[!] No IPs found. Check your network or sources.")
         sys.exit(1)
     merged = collapse_and_sort(nets)
-    write_output(merged)
+    write_output(merged, "data/ir_ips.txt")
     print("[*] Done.")
 
 
